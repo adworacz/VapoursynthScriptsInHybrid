@@ -2140,9 +2140,9 @@ def SMDegrain(clip, tr=2, thSAD=314, thSADC=None, RefineMotion=False, contrashar
         return output
 
 
-def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, meAlg=5, meAlgPar=None, meSubpel=None, meBlksz=None, meTM=False,
+def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, grainLevel=2, meAlg=5, meAlgPar=None, meSubpel=None, meBlksz=None, meTM=False,
     limitSigma=None, limitBlksz=None, fftThreads=None, postFFT=0, postTR=1, postSigma=1, knlDevId=0, ppSAD1=10, ppSAD2=5, 
-    ppSCD1=4, thSCD2=100, DCT=0, SubPelInterp=2, SrchClipPP=3, GlobalMotion=True, ChromaMotion=True, rec=False, extraSharp=False):
+    ppSCD1=4, thSCD2=128, DCT=0, SubPelInterp=2, SrchClipPP=None, GlobalMotion=True, ChromaMotion=True, rec=False, extraSharp=False):
     """
     Temporal Degrain Updated by ErazorTT                               
                                                                           
@@ -2215,6 +2215,20 @@ def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, meAlg=5, meAlgPar=None, 
         # radius/range parameter for the motion estimation algorithms
         meAlgPar = [2,2,2,2,16,24,2,2][meAlg] 
 
+    longlat = max(w, h)
+    shortlat = min(w, h)
+    # Scale grainLevel from -2-3 -> 0-5
+    grainLevel = grainLevel + 2
+
+    if (longlat<=1050 and shortlat<=576):
+        autoTune = 0
+    elif (longlat<=1280 and shortlat<=720):
+        autoTune = 1
+    elif (longlat<=2048 and shortlat<=1152):
+        autoTune = 2
+    else:
+        autoTune = 3
+
     rad = 3 if extraSharp else None
     mat = [1, 2, 1, 2, 4, 2, 1, 2, 1]
     ChromaNoise = (degrainPlane > 0)
@@ -2222,41 +2236,22 @@ def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, meAlg=5, meAlgPar=None, 
     vpad = meBlksz
     
     if meSubpel is None:
-        if WH < 960:
-            meSubpel = 4
-        elif WH < 2080:
-            meSubpel = 2
-        else:
-            meSubpel = 1
+        meSubpel = [4, 2, 2, 1][autoTune]
     
     if meBlksz is None:
-        if WH < 1280:
-            meBlksz = 8
-        elif WH < 2080:
-            meBlksz = 16
-        else:
-            meBlksz = 32
-    
+        meBlksz = [8, 8, 16, 32][autoTune]
+
+    limitAT = [-1, -1, 0, 0, 0, 1][grainLevel] + autoTune + 1
+
     if limitSigma is None:
-        if WH < 960:
-            limitSigma = 8
-        elif WH < 1280:
-            limitSigma = 12
-        elif WH < 2080:
-            limitSigma = 16
-        else:
-            limitSigma = 32
+        limitSigma = [6,8,12,16,32,48][limitAT]
     
     if limitBlksz is None:
-        if WH < 960:
-            limitBlksz = 16
-        elif WH < 1280:
-            limitBlksz = 24
-        elif WH < 2080:
-            limitBlksz = 32
-        else:
-            limitBlksz = 64
-    
+        limitBlksz = [12,16,24,32,64,96][limitAT]
+
+    if SrchClipPP is None:
+        SrchClipPP = [0,0,0,3,3,3][grainLevel]
+
     if postFFT <= 0:
         postTR = 0
     
@@ -2289,6 +2284,19 @@ def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, meAlg=5, meAlgPar=None, 
     LSAD = 1200 if meTM else 400
     PNew = 50 if meTM else 25
     PLevel = 1 if meTM else 0
+
+    ppSAD1 = ppSAD1 if ppSAD1 is not None else [3,5,7,9,11,13][grainLevel]
+    ppSAD2 = ppSAD2 if ppSAD2 is not None else [2,4,5,6,7,8][grainLevel]
+    ppSCD1 = ppSCD1 if ppSCD1 is not None else [3,3,3,4,5,6][grainLevel]
+
+    if DCT == 5:
+        #rescale threshold to match the SAD values when using SATD
+        ppSAD1 *= 1.7
+        ppSAD2 *= 1.7
+
+    # ppSCD1 - this must not be scaled since scd is always based on SAD independently of the actual dct setting
+
+    #here the per-pixel measure is converted to the per-8x8-Block (8*8 = 64) measure MVTools is using
     thSAD1 = int(ppSAD1 * 64)
     thSAD2 = int(ppSAD2 * 64)
     thSCD1 = int(ppSCD1 * 64)
@@ -2350,10 +2358,13 @@ def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, meAlg=5, meAlgPar=None, 
         s2 = limitSigma * 0.625
         s3 = limitSigma * 0.375
         s4 = limitSigma * 0.250
+        ovNum = [4, 4, 4, 3, 2, 2][grainLevel]
+        ov = 2 * round(limitBlksz / ovNum * 0.5)
+
         if hasattr(core, 'neo_fft3d'):
-          spat = core.neo_fft3d.FFT3D(clip, planes=fPlane, sigma=limitSigma, sigma2=s2, sigma3=s3, sigma4=s4, bt=3, bw=limitBlksz, bh=limitBlksz, ncpu=fftThreads)
+          spat = core.neo_fft3d.FFT3D(clip, planes=fPlane, sigma=limitSigma, sigma2=s2, sigma3=s3, sigma4=s4, bt=3, bw=limitBlksz, bh=limitBlksz, ow=ov, oh=ov, ncpu=fftThreads)
         else:
-          spat = core.fft3dfilter.FFT3DFilter(clip, planes=fPlane, sigma=limitSigma, sigma2=s2, sigma3=s3, sigma4=s4, bt=3, bw=limitBlksz, bh=limitBlksz, ncpu=fftThreads)
+          spat = core.fft3dfilter.FFT3DFilter(clip, planes=fPlane, sigma=limitSigma, sigma2=s2, sigma3=s3, sigma4=s4, bt=3, bw=limitBlksz, bh=limitBlksz, ow=ov, oh=ov, ncpu=fftThreads)
         spatD  = core.std.MakeDiff(clip, spat)
   
     # First MV-denoising stage. Usually here's some temporal-medianfiltering going on.
