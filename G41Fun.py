@@ -2141,7 +2141,7 @@ def SMDegrain(clip, tr=2, thSAD=314, thSADC=None, RefineMotion=False, contrashar
 
 
 def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, grainLevel=2, meAlg=5, meAlgPar=None, meSubpel=None, meBlksz=None, meTM=False,
-    limitSigma=None, limitBlksz=None, fftThreads=None, postFFT=0, postTR=1, postSigma=1, knlDevId=0, ppSAD1=10, ppSAD2=5, 
+    limitSigma=None, limitBlksz=None, fftThreads=None, postFFT=0, postTR=1, postSigma=1, postMix=0, knlDevId=0, ppSAD1=10, ppSAD2=5, 
     ppSCD1=4, thSCD2=128, DCT=0, SubPelInterp=2, SrchClipPP=None, GlobalMotion=True, ChromaMotion=True, rec=False, extraSharp=False, outputStage=2):
     """
     Temporal Degrain Updated by ErazorTT                               
@@ -2443,6 +2443,9 @@ def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, grainLevel=2, meAlg=5, m
         dnWindow = dnWindow[postTR::postTD]
 
     sharpened = ContraSharpening(dnWindow, clip, rad)
+
+    if postMix > 0:
+        sharpened = core.std.Expr([clip,sharpened],f"x {postMix} * y {100-postMix} * + 100 /")
 
     return [NR1x, NR2, sharpened][outputStage]
 
