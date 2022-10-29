@@ -2172,6 +2172,10 @@ def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, meAlg=5, meAlgPar=None, 
     - postFFT, if you want to remove absolutely all remaining noise suggestion is to use 3 (dfttest) for its quality, 1/2 (ff3dfilter) is much faster but can introduce banding, 4 is KNLMeansCL.
     - postSigma, increase it to remove all the remaining noise you want removed, but do not increase too much since unnecessary high values have severe negative impact on either banding and/or sharpness
     - degrainPlane, if you just want to denoise the chroma use 3 (helps with compressability with the clip being almost identical to the original)
+
+    Changelog
+    October 29, 2022:
+        - Add defaults for meAlgPar, matching AVS version.
     """
 
     if not isinstance(clip, vs.VideoNode) or clip.format.color_family not in [vs.GRAY, vs.YUV]:
@@ -2206,6 +2210,11 @@ def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, meAlg=5, meAlgPar=None, 
       RG = core.rgsf.RemoveGrain if isFLOAT else core.rgvs.RemoveGrain
     else:
       RG = core.rgvs.RemoveGrain
+
+    if meAlgPar is None:
+        # radius/range parameter for the motion estimation algorithms
+        meAlgPar = [2,2,2,2,16,24,2,2][meAlg] 
+
     rad = 3 if extraSharp else None
     mat = [1, 2, 1, 2, 4, 2, 1, 2, 1]
     ChromaNoise = (degrainPlane > 0)
