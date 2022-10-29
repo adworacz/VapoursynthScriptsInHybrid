@@ -2142,7 +2142,7 @@ def SMDegrain(clip, tr=2, thSAD=314, thSADC=None, RefineMotion=False, contrashar
 
 def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, grainLevel=2, meAlg=5, meAlgPar=None, meSubpel=None, meBlksz=None, meTM=False,
     limitSigma=None, limitBlksz=None, fftThreads=None, postFFT=0, postTR=1, postSigma=1, knlDevId=0, ppSAD1=10, ppSAD2=5, 
-    ppSCD1=4, thSCD2=128, DCT=0, SubPelInterp=2, SrchClipPP=None, GlobalMotion=True, ChromaMotion=True, rec=False, extraSharp=False):
+    ppSCD1=4, thSCD2=128, DCT=0, SubPelInterp=2, SrchClipPP=None, GlobalMotion=True, ChromaMotion=True, rec=False, extraSharp=False, outputStage=2):
     """
     Temporal Degrain Updated by ErazorTT                               
                                                                           
@@ -2183,7 +2183,6 @@ def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, grainLevel=2, meAlg=5, m
     
     w = clip.width
     h = clip.height
-    WH = max(w, h)
     bd = clip.format.bits_per_sample
     isFLOAT = clip.format.sample_type == vs.FLOAT
     isGRAY = clip.format.color_family == vs.GRAY
@@ -2293,8 +2292,7 @@ def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, grainLevel=2, meAlg=5, m
         #rescale threshold to match the SAD values when using SATD
         ppSAD1 *= 1.7
         ppSAD2 *= 1.7
-
-    # ppSCD1 - this must not be scaled since scd is always based on SAD independently of the actual dct setting
+        # ppSCD1 - this must not be scaled since scd is always based on SAD independently of the actual dct setting
 
     #here the per-pixel measure is converted to the per-8x8-Block (8*8 = 64) measure MVTools is using
     thSAD1 = int(ppSAD1 * 64)
@@ -2403,8 +2401,6 @@ def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, grainLevel=2, meAlg=5, m
     else:
         NR2 = clip
     
-    NR2 = RG(NR2, mode=1) # Filter to remove last bits of dancing pixels, YMMV.
-
     #---------------------------------------
     # post FFT
     if postTR > 0:
@@ -2441,12 +2437,14 @@ def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, grainLevel=2, meAlg=5, m
         else:
           dnWindow = core.fft3dfilter.FFT3DFilter(noiseWindow, sigma=postSigma*i, planes=fPlane, bt=postTD, ncpu=fftThreads)
     else:
-        dnWindow = noiseWindow
+        dnWindow = RG(noiseWindow, mode=1)
     
     if postTR > 0:
         dnWindow = dnWindow[postTR::postTD]
-    
-    return ContraSharpening(dnWindow, clip, rad)
+
+    sharpened = ContraSharpening(dnWindow, clip, rad)
+
+    return [NR1x, NR2, sharpened][outputStage]
 
 
 def mClean(clip, thSAD=400, chroma=True, sharp=10, rn=14, deband=0, depth=0, strength=20, outbits=None, icalc=True, rgmode=18):
