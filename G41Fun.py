@@ -2140,7 +2140,7 @@ def SMDegrain(clip, tr=2, thSAD=314, thSADC=None, RefineMotion=False, contrashar
         return output
 
 
-def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, grainLevel=2, meAlg=5, meAlgPar=None, meSubpel=None, meBlksz=None, meTM=False,
+def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, grainLevel=2, grainLevelSetup=False, meAlg=5, meAlgPar=None, meSubpel=None, meBlksz=None, meTM=False,
     limitSigma=None, limitBlksz=None, fftThreads=None, postFFT=0, postTR=1, postSigma=1, postMix=0, knlDevId=0, ppSAD1=10, ppSAD2=5, 
     ppSCD1=4, thSCD2=128, DCT=0, SubPelInterp=2, SrchClipPP=None, GlobalMotion=True, ChromaMotion=True, rec=False, extraSharp=False, outputStage=2):
     """
@@ -2271,6 +2271,10 @@ def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, grainLevel=2, meAlg=5, m
 
     if postFFT in [1, 2]:
         postTR = min(postTR, 2)
+
+    if grainLevelSetup:
+        outputStage = 0
+        degrainTR = 3
 
     rad = 3 if extraSharp else None
     mat = [1, 2, 1, 2, 4, 2, 1, 2, 1]
