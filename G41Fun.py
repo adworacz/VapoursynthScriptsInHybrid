@@ -2228,11 +2228,7 @@ def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, grainLevel=2, meAlg=5, m
     else:
         autoTune = 3
 
-    rad = 3 if extraSharp else None
-    mat = [1, 2, 1, 2, 4, 2, 1, 2, 1]
     ChromaNoise = (degrainPlane > 0)
-    hpad = meBlksz
-    vpad = meBlksz
     
     if meSubpel is None:
         meSubpel = [4, 2, 2, 1][autoTune]
@@ -2276,6 +2272,10 @@ def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, grainLevel=2, meAlg=5, m
     if postFFT in [1, 2]:
         postTR = min(postTR, 2)
 
+    rad = 3 if extraSharp else None
+    mat = [1, 2, 1, 2, 4, 2, 1, 2, 1]
+    hpad = meBlksz
+    vpad = meBlksz
     postTD  = postTR * 2 + 1
     maxTR = max(degrainTR, postTR)
     Overlap = meBlksz / 2
