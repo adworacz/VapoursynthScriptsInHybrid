@@ -2318,7 +2318,8 @@ def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, grainLevel=2, meAlg=5, m
 
     analyse_args = dict(blksize=meBlksz, overlap=Overlap, search=meAlg, searchparam=meAlgPar, pelsearch=meSubpel, truemotion=meTM, lambda_=Lambda, lsad=LSAD, pnew=PNew, plevel=PLevel, global_=GlobalMotion, dct=DCT, chroma=ChromaMotion)
     recalculate_args = dict(blksize=Overlap, overlap=Overlap/2, search=meAlg, searchparam=meAlgPar, truemotion=meTM, lambda_=Lambda/4, pnew=PNew, dct=DCT, chroma=ChromaMotion)
-    srchSuper = S(DitherLumaRebuild(srchClip, s0=1, chroma=ChromaMotion), pel=meSubpel, sharp=1, rfilter=4, hpad=hpad, vpad=vpad, chroma=ChromaMotion)
+    super_args = dict(pel=meSubpel, hpad=hpad, vpad=vpad, chroma=ChromaMotion)
+    srchSuper = S(DitherLumaRebuild(srchClip, s0=1, chroma=ChromaMotion), sharp=1, rfilter=4, **super_args)
     
     if (maxTR > 0) and (degrainTR < 4 or postTR < 4):
         bVec1 = A(srchSuper, isb=True,  delta=1, **analyse_args)
@@ -2365,10 +2366,13 @@ def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, grainLevel=2, meAlg=5, m
           spat = core.fft3dfilter.FFT3DFilter(clip, planes=fPlane, sigma=limitSigma, sigma2=s2, sigma3=s3, sigma4=s4, bt=3, bw=limitBlksz, bh=limitBlksz, ow=ov, oh=ov, ncpu=fftThreads)
         spatD  = core.std.MakeDiff(clip, spat)
   
+    # Update super args for all other motion analysis
+    super_args |= dict(chroma=ChromaNoise, sharp=SubPelInterp, levels=1)
+
     # First MV-denoising stage. Usually here's some temporal-medianfiltering going on.
     # For simplicity, we just use MDegrain.
     if degrainTR > 0:
-        supero = S(clip, pel=meSubpel, sharp=SubPelInterp, levels=1, rfilter=1, hpad=hpad, vpad=vpad, chroma=ChromaNoise)
+        supero = S(clip, **super_args)
 
         if degrainTR < 2:
             NR1 = D1(clip, supero, bVec1, fVec1, plane=degrainPlane, thsad=thSAD1, thscd1=thSCD1, thscd2=thSCD2)
@@ -2388,7 +2392,7 @@ def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, grainLevel=2, meAlg=5, m
   
     # Second MV-denoising stage. We use MDegrain.
     if degrainTR > 0:
-        NR1x_super = S(NR1x, pel=meSubpel, sharp=SubPelInterp, levels=1, rfilter=1, hpad=hpad, vpad=vpad, chroma=ChromaNoise)
+        NR1x_super = S(NR1x, **super_args)
 
         if degrainTR < 2:
             NR2 = D1(NR1x, NR1x_super, bVec1, fVec1, plane=degrainPlane, thsad=thSAD2, thscd1=thSCD1, thscd2=thSCD2)
@@ -2404,26 +2408,26 @@ def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, grainLevel=2, meAlg=5, m
     #---------------------------------------
     # post FFT
     if postTR > 0:
-        fullSuper = S(NR2, pel=meSubpel, sharp=SubPelInterp, levels=1, rfilter=1, hpad=hpad, vpad=vpad, chroma=ChromaNoise)
+        fullSuper = S(NR2, **super_args)
 
     if postTR > 0:
         if postTR == 1:
-            noiseWindow = core.std.Interleave([C(NR2, fullSuper, fVec1, thscd1=thSCD1, thscd2=thSCD2), NR2,
-                                               C(NR2, fullSuper, bVec1, thscd1=thSCD1, thscd2=thSCD2)])
+            noiseWindow = core.std.Interleave([C(NR2, fullSuper, fVec1, thsad=thSAD2, thscd1=thSCD1, thscd2=thSCD2), NR2,
+                                               C(NR2, fullSuper, bVec1, thsad=thSAD2, thscd1=thSCD1, thscd2=thSCD2)])
         elif postTR == 2:
-            noiseWindow = core.std.Interleave([C(NR2, fullSuper, fVec2, thscd1=thSCD1, thscd2=thSCD2),
-                                               C(NR2, fullSuper, fVec1, thscd1=thSCD1, thscd2=thSCD2), NR2,
-                                               C(NR2, fullSuper, bVec1, thscd1=thSCD1, thscd2=thSCD2),
-                                               C(NR2, fullSuper, bVec2, thscd1=thSCD1, thscd2=thSCD2)])
+            noiseWindow = core.std.Interleave([C(NR2, fullSuper, fVec2, thsad=thSAD2, thscd1=thSCD1, thscd2=thSCD2),
+                                               C(NR2, fullSuper, fVec1, thsad=thSAD2, thscd1=thSCD1, thscd2=thSCD2), NR2,
+                                               C(NR2, fullSuper, bVec1, thsad=thSAD2, thscd1=thSCD1, thscd2=thSCD2),
+                                               C(NR2, fullSuper, bVec2, thsad=thSAD2, thscd1=thSCD1, thscd2=thSCD2)])
         elif postTR == 3:
-            noiseWindow = core.std.Interleave([C(NR2, fullSuper, fVec3, thscd1=thSCD1, thscd2=thSCD2),
-                                               C(NR2, fullSuper, fVec2, thscd1=thSCD1, thscd2=thSCD2),
-                                               C(NR2, fullSuper, fVec1, thscd1=thSCD1, thscd2=thSCD2), NR2,
-                                               C(NR2, fullSuper, bVec1, thscd1=thSCD1, thscd2=thSCD2),
-                                               C(NR2, fullSuper, bVec2, thscd1=thSCD1, thscd2=thSCD2),
-                                               C(NR2, fullSuper, bVec3, thscd1=thSCD1, thscd2=thSCD2)])
+            noiseWindow = core.std.Interleave([C(NR2, fullSuper, fVec3, thsad=thSAD2, thscd1=thSCD1, thscd2=thSCD2),
+                                               C(NR2, fullSuper, fVec2, thsad=thSAD2, thscd1=thSCD1, thscd2=thSCD2),
+                                               C(NR2, fullSuper, fVec1, thsad=thSAD2, thscd1=thSCD1, thscd2=thSCD2), NR2,
+                                               C(NR2, fullSuper, bVec1, thsad=thSAD2, thscd1=thSCD1, thscd2=thSCD2),
+                                               C(NR2, fullSuper, bVec2, thsad=thSAD2, thscd1=thSCD1, thscd2=thSCD2),
+                                               C(NR2, fullSuper, bVec3, thsad=thSAD2, thscd1=thSCD1, thscd2=thSCD2)])
         else:
-            noiseWindow = mvmulti.Compensate(NR2, fullSuper, vmulti2, thscd1=thSCD1, thscd2=thSCD2, tr=postTR)
+            noiseWindow = mvmulti.Compensate(NR2, fullSuper, vmulti2, thsad=thSAD2, thscd1=thSCD1, thscd2=thSCD2, tr=postTR)
     else:
         noiseWindow = NR2
     
