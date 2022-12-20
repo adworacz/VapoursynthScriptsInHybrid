@@ -2212,7 +2212,9 @@ def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, grainLevel=2, grainLevel
 
     if meAlgPar is None:
         # radius/range parameter for the motion estimation algorithms
-        meAlgPar = [2,2,2,2,16,24,2,2][meAlg] 
+        # meAlgPar = [2,2,2,2,16,24,2,2][meAlg] 
+        # Using Dogway's SMDegrain options here instead of the TemporalDegrain2 AVSI versions, which seem wrong.
+        meAlgPar = 5 if rec and meTM else 2
 
     longlat = max(w, h)
     shortlat = min(w, h)
@@ -2323,6 +2325,7 @@ def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, grainLevel=2, grainLevel
     analyse_args = dict(blksize=meBlksz, overlap=Overlap, search=meAlg, searchparam=meAlgPar, pelsearch=meSubpel, truemotion=meTM, lambda_=Lambda, lsad=LSAD, pnew=PNew, plevel=PLevel, global_=GlobalMotion, dct=DCT, chroma=ChromaMotion)
     recalculate_args = dict(blksize=Overlap, overlap=Overlap/2, search=meAlg, searchparam=meAlgPar, truemotion=meTM, lambda_=Lambda/4, pnew=PNew, dct=DCT, chroma=ChromaMotion)
     super_args = dict(pel=meSubpel, hpad=hpad, vpad=vpad, chroma=ChromaMotion)
+    # TODO: Tune params (like `c`) to match SMDegrain.
     srchSuper = S(DitherLumaRebuild(srchClip, s0=1, chroma=ChromaMotion), sharp=1, rfilter=4, **super_args)
     
     if (maxTR > 0) and (degrainTR < 4 or postTR < 4):
