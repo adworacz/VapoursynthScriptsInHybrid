@@ -2159,23 +2159,49 @@ def TemporalDegrain2(clip, degrainTR=2, degrainPlane=4, grainLevel=2, grainLevel
     Optional plugins:                                                         
     dfttest: https://github.com/HomeOfVapourSynthEvolution/VapourSynth-DFTTest            
     KNLMeansCL: https://github.com/Khanattila/KNLMeansCL
+
+    recommendations to be followed for each new movie:
+      1. start with default settings
+      2. if less denoising is needed set grainLevel to 0, if you need more degraining start over reading at next paragraph
+      3. if you need even less denoising:
+         - EITHER: set outputStage to 1 or even 0 (faster)
+         - OR: use the postMix setting and increase the value from 0 to as much as 100 (slower)
+
+    recommendations for strong degraining: 
+      1. start with default settings
+      2. search the noisiest* patch of the entire movie, enable grainLevelSetup (=true), zoom in as much as you can and prepare yourself for pixel peeping. (*it really MUST be the noisiest region where you want this filter to be effective)
+      3. compare the output on this noisy* patch of your movie with different settings of grainLevel (0 to 3) and use the setting where the noise level is lowest (irrespectable of whether you find this to be too much filtering).
+         If multiple grainLevel settings yield comparable results while grainLevelSetup=true and observing at maximal zoom be sure to use the lowest setting! If you're unsure leave it at the default (2), your result might no be optimal, but it will still be great.
+      4. disable grainLevelSetup (=false), or just remove this argument from the function call. Now revert the zoom and look from a normal distance at different scenes of the movie and decide if you like what you see.
+      5. if more denoising is needed try postFFT=1 with postSigma=1, then tune postSigma (obvious blocking and banding of regions in the sky are indications of a value which is at least a factor 2 too high)
+      6. if you would need a postSigma of more than 2, try first to increase degrainTR to 2. The goal is to balance the numerical values of postSigma and degrainTR, some prefer more simga and others more TR, it's up to you. However, do not increase degrainTR above 1/8th of the fps (at 24fps up to 3).
+      7. if you cranked up postSigma higher than 3 then try postFFT=3 instead. Also if there are any issues with banding then try postFFT=3, then perhaps in combination with negative values of postDither.
+      8. if the luma is clean but you still have visible chroma noise then you can adjust postSigmaC which will separately clean the chroma planes (at a considerable amount of processing speed).
+
+    use only the following knobs (all other settings should already be where they need to be):
+      - degrainTR (1), temporal radius of degrain, usefull range: min=default=1, max=fps/8. Higher values do clean the video more, but also increase probability of wrongly identified motion vectors which leads to washed out regions
+      - grainLevel (2), if input noise level is relatively low set this to 0, if its unusually high you might need to increase it to 3. The right setting must be found using grainLevelSetup=true while all other settings are at default. Set this setting such that the noise level is lowest.
+      - grainLevelSetup (false), only to be used while finding the right setting for grainLevel. This will skip all your other settings!
+      - postFFT (0), if you want to remove absolutely all remaining noise suggestion is to use 1 (ff3dfilter) or for slightly higher quality at the expense of much worse speed 3 (dfttest). 2, 4 and 5 are GPU based versions.
+      - postSigma (1), increase it to remove all the remaining noise you want removed, but do not increase too much since unnecessary high values have severe negative impact on either banding and/or sharpness
+      - degrainPlane (4), if you just want to denoise only the chroma use 3 (this helps with compressability while the clip is almost identical to the original)
+      - outputStage (2), if the degraining is too strong, you can output earlier stages
+      - postMix (0), if the degraining is too strong, increase the value going from 0 to 100
+      - fftThreads (1), usefull if you have processor cores to spare, increasing to 2 will probably help a little with speed (more performace is gained if additonally this script is run in MT_MULTI_INSTANCE mode with a prefetch of at least half of your cores)
     
-    recommendation: 
-    1. start with default settings
-    2a.if there is too much denoising for your taste use degrainTR=1
-    2b.if more denoising is needed try postFFT=1 with postSigma=1, then tune postSigma (obvious blocking and banding of the sky are indications of a value which is at least a factor 2 too high)
-    3. do not increase degrainTR above 1/8 of the fps (at 24fps up to 3)
-    4. if there are any issues with banding switch to postFFT=3
-
-    use only the following knobs (all other settings should already be were they need to be):
-    - degrainTR, temporal radius of degrain, usefull range: min=1, default=2, max=fps/8. Higher values do clean the video more, but also increase probability of wrongly identified motion meAlg which leads to washed out regions
-    - postFFT, if you want to remove absolutely all remaining noise suggestion is to use 3 (dfttest) for its quality, 1/2 (ff3dfilter) is much faster but can introduce banding, 4 is KNLMeansCL.
-    - postSigma, increase it to remove all the remaining noise you want removed, but do not increase too much since unnecessary high values have severe negative impact on either banding and/or sharpness
-    - degrainPlane, if you just want to denoise the chroma use 3 (helps with compressability with the clip being almost identical to the original)
-
     Changelog
-    October 29, 2022:
-        - Add defaults for meAlgPar, matching AVS version.
+    December 19, 2022:
+        - Tune meAlgPar to match Dogway's latest AVS SMDegrain settings.
+        - Add support for grainLevel and grainLevelSetup, with associated autotunning, in alignment with AVS version.
+        - Fix hpad/vpad bug, which wasn't taking blocksize into effect before.
+        - Adjust MSuper settings to align with AVS version.
+        - Add postMix support, for mixing in grain again, in alignment with AVS version.
+        - Add outputStage support, which enables outputting a clip at different stages of the denoising process, in alignment with AVS version.
+        - Update documentation based on AVS version.
+
+    TODO:
+        - Add support for neo_fft3d, like AVS version
+        - Add support for BM3D (CPU/CUDA), dfttest2 (CPU/CUDA)
     """
 
     if not isinstance(clip, vs.VideoNode) or clip.format.color_family not in [vs.GRAY, vs.YUV]:
