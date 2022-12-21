@@ -2141,7 +2141,7 @@ def SMDegrain(clip, tr=2, thSAD=314, thSADC=None, RefineMotion=False, contrashar
 
 
 def TemporalDegrain2(clip, degrainTR=1, degrainPlane=4, grainLevel=2, grainLevelSetup=False, meAlg=4, meAlgPar=None, meSubpel=None, meBlksz=None, meTM=False,
-    limitSigma=None, limitBlksz=None, fftThreads=None, postFFT=0, postTR=1, postSigma=1, postMix=0, knlDevId=0, ppSAD1=10, ppSAD2=5, 
+    limitSigma=None, limitBlksz=None, fftThreads=None, postFFT=0, postTR=1, postSigma=1, postMix=0, postBlkSize=None, knlDevId=0, ppSAD1=10, ppSAD2=5, 
     ppSCD1=4, thSCD2=128, DCT=0, SubPelInterp=2, SrchClipPP=None, GlobalMotion=True, ChromaMotion=True, rec=False, extraSharp=False, outputStage=2):
     """
     Temporal Degrain Updated by ErazorTT                               
@@ -2182,13 +2182,13 @@ def TemporalDegrain2(clip, degrainTR=1, degrainPlane=4, grainLevel=2, grainLevel
       - degrainTR (1), temporal radius of degrain, usefull range: min=default=1, max=fps/8. Higher values do clean the video more, but also increase probability of wrongly identified motion vectors which leads to washed out regions
       - grainLevel (2), if input noise level is relatively low set this to 0, if its unusually high you might need to increase it to 3. The right setting must be found using grainLevelSetup=true while all other settings are at default. Set this setting such that the noise level is lowest.
       - grainLevelSetup (false), only to be used while finding the right setting for grainLevel. This will skip all your other settings!
-      - postFFT (0), if you want to remove absolutely all remaining noise suggestion is to use 1 or 2 (ff3dfilter) or for slightly higher quality at the expense of much worse speed 3 (dfttest). 4 is KNLMeansCL. 0 is simply RemoveGrain(1)
+      - postFFT (0), if you want to remove absolutely all remaining noise suggestion is to use 1 or 2 (ff3dfilter) or for slightly higher quality at the expense of potentially worse speed 3 (dfttest). 4 is KNLMeansCL. 0 is simply RemoveGrain(1)
       - postSigma (1), increase it to remove all the remaining noise you want removed, but do not increase too much since unnecessary high values have severe negative impact on either banding and/or sharpness
       - degrainPlane (4), if you just want to denoise only the chroma use 3 (this helps with compressability while the clip is almost identical to the original)
       - outputStage (2), if the degraining is too strong, you can output earlier stages
       - postMix (0), if the degraining is too strong, increase the value going from 0 to 100
       - fftThreads (1), usefull if you have processor cores to spare, increasing to 2 will probably help a little with speed.
-      - rec (false), enables use of Recalculate for refining motion analysis. Enable for higher quality but lower performance.
+      - rec (false), enables use of Recalculate for refining motion analysis. Enable for higher quality motion estimation but lower performance.
     
     Changelog
     December 19, 2022:
@@ -2203,10 +2203,12 @@ def TemporalDegrain2(clip, degrainTR=1, degrainPlane=4, grainLevel=2, grainLevel
         - Update documentation based on AVS version.
         - Fix bug with postFFT 4, KNLMeansCL args.
         - Minor code cleanup.
+        - Removed weird scaling of sigma values using internal `i` variable, which caused crazy sigma values to be used.
+        - Add support for postBlkSize, in alignment with AVS version.
 
     TODO:
-        - Add support for neo_fft3d, like AVS version
         - Add support for BM3D (CPU/CUDA), dfttest2 (CPU/CUDA)
+        - Remove all params based on meTM (truemotion) that simply replicate the MVtools defaults.
         - Tune DitherLumaRebuild params (like `c`) to match SMDegrain.
     """
 
@@ -2218,6 +2220,7 @@ def TemporalDegrain2(clip, degrainTR=1, degrainPlane=4, grainLevel=2, grainLevel
     bd = clip.format.bits_per_sample
     isFLOAT = clip.format.sample_type == vs.FLOAT
     isGRAY = clip.format.color_family == vs.GRAY
+    # Seems to be used for some kind of bit depth scaling...
     i = 0.00392 if isFLOAT else 1 << (bd - 8)
     mid = 0.5 if isFLOAT else 1 << (bd - 1)
     if hasattr(core, 'mvsf') and isFLOAT:  
@@ -2297,12 +2300,17 @@ def TemporalDegrain2(clip, degrainTR=1, degrainPlane=4, grainLevel=2, grainLevel
     else:
         fPlane = [0, 1, 2]
 
-    postFFT = max(postFFT, 0)
+    if postFFT <= 0:
+        postTR = 0
+
     if postFFT == 3:
         postTR = min(postTR, 7)
 
     if postFFT in [1, 2]:
         postTR = min(postTR, 2)
+
+    if postBlkSize is None:
+        postBlkSize = [0,48,32,12,0,0][postFFT]
 
     if grainLevelSetup:
         outputStage = 0
@@ -2389,7 +2397,6 @@ def TemporalDegrain2(clip, degrainTR=1, degrainPlane=4, grainLevel=2, grainLevel
     # Degrain
     # "spat" is a prefiltered clip which is used to limit the effect of the 1st MV-denoise stage.
     if degrainTR > 0:
-        limitSigma *= i
         s2 = limitSigma * 0.625
         s3 = limitSigma * 0.375
         s4 = limitSigma * 0.250
@@ -2468,14 +2475,14 @@ def TemporalDegrain2(clip, degrainTR=1, degrainPlane=4, grainLevel=2, grainLevel
         noiseWindow = NR2
     
     if postFFT == 3:
-        dnWindow = core.dfttest.DFTTest(noiseWindow, sigma=postSigma*4, tbsize=postTD, planes=fPlane)
+        dnWindow = core.dfttest.DFTTest(noiseWindow, sigma=postSigma*4, tbsize=postTD, planes=fPlane, sbsize=postBlkSize, sosize=postBlkSize*9/12)
     elif postFFT == 4:
         dnWindow = haf.KNLMeansCL(noiseWindow, d=postTR, a=2, h=postSigma/2, device_id=knlDevId) if ChromaNoise else noiseWindow.knlm.KNLMeansCL(d=postTR, a=2, h=postSigma/2, device_id=knlDevId)
     elif postFFT > 0:
         if hasattr(core, 'neo_fft3d'):
-          dnWindow = core.neo_fft3d.FFT3D(noiseWindow, sigma=postSigma*i, planes=fPlane, bt=postTD, ncpu=fftThreads)
+          dnWindow = core.neo_fft3d.FFT3D(noiseWindow, sigma=postSigma, planes=fPlane, bt=postTD, ncpu=fftThreads, bw=postBlkSize, bh=postBlkSize)
         else:
-          dnWindow = core.fft3dfilter.FFT3DFilter(noiseWindow, sigma=postSigma*i, planes=fPlane, bt=postTD, ncpu=fftThreads)
+          dnWindow = core.fft3dfilter.FFT3DFilter(noiseWindow, sigma=postSigma, planes=fPlane, bt=postTD, ncpu=fftThreads, bw=postBlkSize, bh=postBlkSize)
     else:
         dnWindow = RG(noiseWindow, mode=1)
     
