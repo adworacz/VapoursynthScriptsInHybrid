@@ -2141,8 +2141,8 @@ def SMDegrain(clip, tr=2, thSAD=314, thSADC=None, RefineMotion=False, contrashar
 
 
 def TemporalDegrain2(clip, degrainTR=1, degrainPlane=4, grainLevel=2, grainLevelSetup=False, meAlg=4, meAlgPar=None, meSubpel=None, meBlksz=None, meTM=False,
-    limitSigma=None, limitBlksz=None, fftThreads=None, postFFT=0, postTR=1, postSigma=1, postMix=0, postBlkSize=None, knlDevId=0, ppSAD1=10, ppSAD2=5, 
-    ppSCD1=4, thSCD2=128, DCT=0, SubPelInterp=2, SrchClipPP=None, GlobalMotion=True, ChromaMotion=True, rec=False, extraSharp=False, outputStage=2):
+    limitSigma=None, limitBlksz=None, fftThreads=None, postFFT=0, postTR=1, postSigma=1, postMix=0, postBlkSize=None, knlDevId=0, ppSAD1=None, ppSAD2=None, 
+    ppSCD1=None, thSCD2=128, DCT=0, SubPelInterp=2, SrchClipPP=None, GlobalMotion=True, ChromaMotion=True, rec=False, extraSharp=False, outputStage=2):
     """
     Temporal Degrain Updated by ErazorTT                               
                                                                           
@@ -2191,25 +2191,44 @@ def TemporalDegrain2(clip, degrainTR=1, degrainPlane=4, grainLevel=2, grainLevel
       - rec (false), enables use of Recalculate for refining motion analysis. Enable for higher quality motion estimation but lower performance.
     
     Changelog
-    December 19, 2022:
-        - Set meAlg default to 4 to match the AVS version, should be a nice speed improvement for a small drop in quality.
-        - Set degrainTR default to 1 to match the AVS version. Better aligns with use of new grainLevel arg as well.
-        - Tune meAlgPar to match Dogway's latest AVS SMDegrain settings.
-        - Add support for grainLevel and grainLevelSetup, with associated autotunning, in alignment with AVS version.
-        - Fix hpad/vpad bug, which wasn't taking blocksize into effect before.
-        - Adjust MSuper settings to align with AVS version.
-        - Add postMix support, for mixing in grain again, in alignment with AVS version.
-        - Add outputStage support, which enables outputting a clip at different stages of the denoising process, in alignment with AVS version.
+    December 21, 2022 - based on v2.6.3 of Avisynth version (Adub/adworacz):
+        Feature:
+        - Add support for grainLevel and grainLevelSetup, with associated
+          autotunning, in alignment with AVS version.
+        - Add postMix support, for mixing in grain again, in alignment with AVS
+          version.
+        - Add outputStage support, which enables outputting a clip at different
+          stages of the denoising process, in alignment with AVS version.
         - Update documentation based on AVS version.
-        - Fix bug with postFFT 4, KNLMeansCL args.
-        - Minor code cleanup.
-        - Removed weird scaling of sigma values using internal `i` variable, which caused crazy sigma values to be used.
         - Add support for postBlkSize, in alignment with AVS version.
+        - all ppSAD* and ppSCD* variables are autotuned based on grain level.
+
+        Changes:
+        - Set meAlg default to 4 to match the AVS version, should be a nice
+          speed improvement for a small drop in quality.
+        - Set degrainTR default to 1 to match the AVS version. Better aligns
+          with use of new grainLevel arg as well.
+        - Tune meAlgPar to match Dogway's latest AVS SMDegrain settings.
+        - Adjust MSuper settings to better align with AVS version. More work required.
+        - Minor code cleanup.
+        - Renamed internal 'i' variable to `bitDepthMultiplier`
+
+        Bug Fixes:
+        - Fix hpad/vpad bug, which wasn't taking blocksize into effect before.
+        - Fix bug with postFFT 4, KNLMeansCL args.
+        - Removed weird bitdepth scaling of sigma values using internal `i`
+          variable, which caused crazy sigma values to be used. Sigma is
+          bitdepth indepenent, so don't know why it was ever used.
+
 
     TODO:
         - Add support for BM3D (CPU/CUDA), dfttest2 (CPU/CUDA)
         - Remove all params based on meTM (truemotion) that simply replicate the MVtools defaults.
         - Tune DitherLumaRebuild params (like `c`) to match SMDegrain.
+        - Investigate why usage of rfilter=4. AVS version doesn't have it.
+        - Re-evaluate all MVTools params, in particular those associated with
+          level, rfilter, search, and rec/RefineMotion. Those currently used
+          differ significantly from AVS version, SMDegrain, and MCTemporalDenoise
     """
 
     if not isinstance(clip, vs.VideoNode) or clip.format.color_family not in [vs.GRAY, vs.YUV]:
@@ -2221,7 +2240,7 @@ def TemporalDegrain2(clip, degrainTR=1, degrainPlane=4, grainLevel=2, grainLevel
     isFLOAT = clip.format.sample_type == vs.FLOAT
     isGRAY = clip.format.color_family == vs.GRAY
     # Seems to be used for some kind of bit depth scaling...
-    i = 0.00392 if isFLOAT else 1 << (bd - 8)
+    bitDepthMultiplier = 0.00392 if isFLOAT else 1 << (bd - 8)
     mid = 0.5 if isFLOAT else 1 << (bd - 1)
     if hasattr(core, 'mvsf') and isFLOAT:  
       S = core.mvsf.Super
@@ -2247,6 +2266,9 @@ def TemporalDegrain2(clip, degrainTR=1, degrainPlane=4, grainLevel=2, grainLevel
 
     if meAlgPar is None:
         # radius/range parameter for the motion estimation algorithms
+        # AVS version uses the following, but values seemed to be based on an
+        # incorrect understanding of the MVTools motion seach algorithm, mistaking 
+        # it for the exact x264 behavior.
         # meAlgPar = [2,2,2,2,16,24,2,2][meAlg] 
         # Using Dogway's SMDegrain options here instead of the TemporalDegrain2 AVSI versions, which seem wrong.
         meAlgPar = 5 if rec and meTM else 2
@@ -2357,7 +2379,7 @@ def TemporalDegrain2(clip, degrainTR=1, degrainPlane=4, grainLevel=2, grainLevel
     if SrchClipPP < 3:
         srchClip = spatialBlur
     else:
-        expr = 'x {a} + y < x {b} + x {a} - y > x {b} - x y + 2 / ? ?'.format(a=7*i, b=2*i)
+        expr = 'x {a} + y < x {b} + x {a} - y > x {b} - x y + 2 / ? ?'.format(a=7*bitDepthMultiplier, b=2*bitDepthMultiplier)
         srchClip = core.std.Expr([spatialBlur, clip], [expr] if ChromaMotion or isGRAY else [expr, ''])
 
     analyse_args = dict(blksize=meBlksz, overlap=Overlap, search=meAlg, searchparam=meAlgPar, pelsearch=meSubpel, truemotion=meTM, lambda_=Lambda, lsad=LSAD, pnew=PNew, plevel=PLevel, global_=GlobalMotion, dct=DCT, chroma=ChromaMotion)
